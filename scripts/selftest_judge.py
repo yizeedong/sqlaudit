@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""判分器自测：证明它不会"什么都放过"，也不会因为精度差异误杀。
+r"""判分器自测：证明它不会"什么都放过"，也不会因为精度差异误杀。
 
 用法：
     .venv\Scripts\python.exe scripts\selftest_judge.py

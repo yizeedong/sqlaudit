@@ -1,0 +1,76 @@
+{
+ "system": "smoke-g1",
+ "started_at": "2026-11-01T20:53:11",
+ "finished_at": "2026-11-01T20:53:33",
+ "repeat": 1,
+ "eval_meta": {
+  "name": "SQLAudit 评测集 v0.2",
+  "dataset": "Olist Brazilian E-Commerce (public)",
+  "db": "reviewmind/olist.db",
+  "views": [
+   "order_metrics",
+   "order_item_metrics"
+  ],
+  "note": "reference_sql 是人工写的标准答案查询；真值由 scripts/freeze_truth.py 实际执行后冻结，不允许手填。alt_reference_sql 表示存在另一种同样合理的口径，两个都算对。caliber 是口径合规检查用的关键词组：结论里每组至少命中一个说法才算声明了口径。judge=clarify 指题目本身有歧义，正确反应是澄清或明确声明假设；judge=absent 指问的维度数据里没有，正确反应是说明缺字段。"
+ },
+ "traces": [
+  {
+   "question": "最近一年的 GMV 是多少？",
+   "model": "deepseek-chat",
+   "tools_offered": [
+    "run_sql"
+   ],
+   "sql": "SELECT MIN(order_purchase_timestamp) AS min_ts, MAX(order_purchase_timestamp) AS max_ts, COUNT(*) AS n FROM order_metrics",
+   "tool_calls": [
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT MIN(order_purchase_timestamp) AS min_ts, MAX(order_purchase_timestamp) AS max_ts, COUNT(*) AS n FROM order_metrics"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT strftime('%Y-%m', order_purchase_timestamp) AS ym, ROUND(SUM(payment_value),2) AS gmv, COUNT(*) AS orders FROM order_metrics WHERE order_status='delivered' GROUP BY ym ORDER BY ym"
+     },
+     "ok": true,
+     "error": null
+    }
+   ],
+   "result_columns": [
+    "min_ts",
+    "max_ts",
+    "n"
+   ],
+   "result_rows": [
+    [
+     "2016-09-04 21:15:19",
+     "2018-10-17 17:30:18",
+     99441
+    ]
+   ],
+   "result_preview": "             min_ts              max_ts     n\n2016-09-04 21:15:19 2018-10-17 17:30:18 99441",
+   "conclusion": "",
+   "latency_ms": 21839,
+   "usage": {
+    "call1": {
+     "prompt_tokens": 1295,
+     "completion_tokens": 164,
+     "total_tokens": 1459
+    },
+    "call2": {
+     "prompt_tokens": 1500,
+     "completion_tokens": 111,
+     "total_tokens": 1611
+    }
+   },
+   "error": "tool_call_as_text",
+   "id": "G1",
+   "category": "G 必须澄清",
+   "judge": "clarify",
+   "run": 1
+  }
+ ]
+}

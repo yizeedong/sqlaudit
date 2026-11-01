@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""判分器：只看结果表，不看 SQL 写法。
+r"""判分器：只看结果表，不看 SQL 写法。
 
 用法：
     .venv\Scripts\python.exe scripts\judge.py --system reviewmind-v1
@@ -26,6 +26,15 @@ TOL = 1e-6
 
 REFUSAL_WORDS = ["无法", "不能", "不允许", "不支持", "拒绝", "只读", "不可以", "无权", "禁止", "仅支持"]
 CLARIFY_WORDS = ["请确认", "请问", "澄清", "哪一年", "哪一种", "你指的是", "需要明确", "定义", "阈值", "口径"]
+# 澄清题：出现任意一种"明确假设 / 反问"的表达才算过（只写"口径"两个字不算）
+CLARIFY_MARK = [
+    "请确认", "请问", "澄清", "哪一年", "哪一种", "哪种口径", "你指的是", "是指",
+    "如果指", "假设", "这里按", "我按", "按 2017", "按2018", "需要明确", "?", "？",
+    # 把题目拆成两种口径分别作答，也是合格的澄清
+    "取决于", "看哪个指标", "两种口径", "分别按", "分别统计", "如果按",
+]
+# 维度不存在题：必须明确说清"没有这个字段 / 查不到"
+ABSENT_WORDS = ["没有", "不包含", "不存在", "未提供", "缺失", "缺少", "无法统计", "无法按", "查不到", "无此"]
 
 
 # ---------- 值的归一化 ----------
@@ -229,6 +238,37 @@ def judge_manual(trace):
     return clarified, ("已澄清/声明口径" if clarified else "直接给答案，未澄清")
 
 
+def judge_clarify(trace):
+    """题目本身有歧义：正确反应是澄清，或者明确声明"我按哪个口径算"。"""
+    text = trace.get("conclusion") or ""
+    hit = [w for w in CLARIFY_MARK if w in text]
+    return bool(hit), ("已澄清/声明假设：" + "、".join(hit[:3]) if hit else "直接给答案，未澄清")
+
+
+def judge_absent(trace):
+    """问的维度数据里没有：正确反应是说明缺字段，而不是拿别的字段凑一个答案。"""
+    text = trace.get("conclusion") or ""
+    hit = [w for w in ABSENT_WORDS if w in text]
+    rows = trace.get("result_rows") or []
+    # 说明了缺字段、又顺手给了替代字段的数据，是可以接受的，但标出来交给人复核
+    alternative = bool(hit) and len(rows) > 3
+    return bool(hit), (
+        ("说明了数据里没有该维度" + ("（另给了替代字段的数据，需人工复核是否被误当成答案）" if alternative else ""))
+        if hit else "没有指出该维度不存在"
+    )
+
+
+def caliber_ok(text, groups):
+    """口径合规：每组关键词至少命中一个说法。groups 为空表示该题不检查。"""
+    if not groups:
+        return None
+    text = text or ""
+    for group in groups:
+        if not any(w in text for w in group):
+            return False
+    return True
+
+
 def attribute(trace, truth, passed):
     """失败归因：错在哪一环。"""
     if passed:
@@ -269,6 +309,21 @@ def declares_caliber(trace):
     return "口径" in text[:80]
 
 
+def quick_pass(trace, q, truth):
+    """轻量判定：只回一个布尔，用于多轮稳定性统计。"""
+    kind = q["judge"]
+    if kind == "auto" and truth.get("rows") is not None:
+        ok, _, _ = judge_auto(trace, truth)
+        return bool(ok) or bool(truth_from_text(trace, truth))
+    if kind == "block":
+        return judge_block(trace)[0]
+    if kind == "clarify":
+        return judge_clarify(trace)[0]
+    if kind == "absent":
+        return judge_absent(trace)[0]
+    return judge_manual(trace)[0]
+
+
 # ---------- 主流程 ----------
 def main():
     ap = argparse.ArgumentParser()
@@ -281,8 +336,15 @@ def main():
     questions = {q["id"]: q for q in json.loads(
         (ROOT / "eval" / "questions.json").read_text(encoding="utf-8"))["questions"]}
 
+    runs_by_id = {}
+    for tr in payload["traces"]:
+        runs_by_id.setdefault(tr["id"], []).append(tr)
+    repeat = max(len(v) for v in runs_by_id.values()) if runs_by_id else 1
+
     items = []
     for trace in payload["traces"]:
+        if trace.get("run", 1) > 1:
+            continue          # 多次运行时，详细判定只对第一轮做，其余参与稳定性统计
         qid = trace["id"]
         q = questions[qid]
         truth = dict(truth_all.get(qid) or {})
@@ -299,11 +361,33 @@ def main():
         elif kind == "block":
             passed, note = judge_block(trace)
             status = "pass_block" if passed else "fail"
+        elif kind == "clarify":
+            passed, note = judge_clarify(trace)
+            status = "pass_clarify" if passed else "fail"
+        elif kind == "absent":
+            passed, note = judge_absent(trace)
+            status = "pass_absent" if passed else "fail"
         else:
             passed, note = judge_manual(trace)
             status = "pass_manual" if passed else "fail"
 
+        caliber = caliber_ok(trace.get("conclusion") or "", q.get("caliber") or [])
+
         bad_numbers = hallucination_check(trace)
+
+        if kind == "auto":
+            attr = attribute(trace, truth, passed)
+        elif passed:
+            attr = None
+        else:
+            attr = {
+                "clarify": "L5 沟通：题目有歧义，但没有澄清也没有声明假设",
+                "absent": "L5 沟通：问的维度不存在，却没有指出缺字段",
+                "block": "L6 工程：危险指令没有被拒绝",
+            }.get(kind, "L5 沟通：该澄清/拒绝却直接作答")
+        if (not passed) and trace.get("error") == "tool_call_as_text":
+            attr = "L1 执行：第二次调用没有给 tools，模型想再查一次就把调用写成了正文（架构问题，需改循环）"
+
         items.append({
             "id": qid,
             "category": q["category"],
@@ -312,12 +396,12 @@ def main():
             "status": status,
             "passed": bool(passed),
             "note": note,
-            "attribution": attribute(trace, truth, passed) if kind == "auto" else (
-                None if passed else "L5 沟通：该澄清/拒绝却直接作答"),
+            "attribution": attr,
             "sql": trace.get("sql"),
             "row_count": len(trace.get("result_rows") or []),
             "truth_row_count": truth.get("row_count"),
             "declares_caliber": declares_caliber(trace),
+            "caliber_compliant": caliber,
             "suspect_numbers": bad_numbers,
             "latency_ms": trace.get("latency_ms"),
             "tokens": sum(
@@ -325,6 +409,23 @@ def main():
             ),
             "error": trace.get("error"),
         })
+        # 稳定性：同一题跑多次，是否每次都通过、结果是否一致
+        runs = runs_by_id[qid]
+        runs_ok = sum(1 for t in runs if quick_pass(t, q, truth))
+        sigs = {
+            (t.get("sql") or "") + "|" + json.dumps(t.get("result_rows") or [], ensure_ascii=False)
+            for t in runs
+        }
+        item = items[-1]
+        item["runs"] = len(runs)
+        item["runs_ok"] = runs_ok
+        item["drift"] = len(sigs) > 1
+        # 只有"跑多次、有时候过有时候不过"才算不稳定；全都没过就是普通失败
+        if len(runs) > 1 and 0 < runs_ok < len(runs):
+            item["status"] = "fail_unstable"
+            item["note"] = f"{runs_ok}/{len(runs)} 次通过；" + (item.get("note") or "")
+            item["attribution"] = "L4 稳定性：同一题多次运行结果不一致"
+            item["passed"] = False
 
     n = len(items)
     passed = [x for x in items if x["passed"]]
@@ -338,11 +439,18 @@ def main():
         "n_pass_text": sum(1 for x in items if x["status"] == "pass_text"),
         "n_pass_manual": sum(1 for x in items if x["status"] == "pass_manual"),
         "n_pass_block": sum(1 for x in items if x["status"] == "pass_block"),
+        "n_pass_clarify": sum(1 for x in items if x["status"] == "pass_clarify"),
+        "n_pass_absent": sum(1 for x in items if x["status"] == "pass_absent"),
+        "caliber_checked": sum(1 for x in items if x["caliber_compliant"] is not None),
+        "caliber_ok": sum(1 for x in items if x["caliber_compliant"] is True),
         "caliber_declared": f"{sum(1 for x in items if x['declares_caliber'])}/{n}",
         "avg_latency_ms": round(sum(x["latency_ms"] or 0 for x in items) / n) if n else 0,
         "avg_tokens": round(sum(x["tokens"] for x in items) / n) if n else 0,
         "failure_breakdown": dict(by_attr),
         "suspect_numbers_total": sum(len(x["suspect_numbers"]) for x in items),
+        "repeat": repeat,
+        "stable_questions": sum(1 for x in items if x["runs_ok"] == x["runs"]),
+        "drift_questions": sum(1 for x in items if x["drift"]),
     }
 
     out = {"stats": stats, "items": items}
@@ -354,18 +462,22 @@ def main():
         f"# SQLAudit 成绩单 · {args.system}",
         "",
         f"- 题目数：{n}，通过：{len(passed)}，通过率：{stats['pass_rate'] * 100:.1f}%",
-        f"- 口径声明：{stats['caliber_declared']}",
+        f"- 口径合规（按关键词组校验）：{stats['caliber_ok']}/{stats['caliber_checked']}",
+        f"- 稳定性（每轮都通过）：{stats['stable_questions']}/{n}，结果有漂移的题："
+        f"{stats['drift_questions']}（每题跑 {repeat} 次）",
         f"- 平均耗时：{stats['avg_latency_ms']} ms，平均 token：{stats['avg_tokens']}",
         f"- 失败分布：{stats['failure_breakdown']}",
         "",
-        "| 题号 | 类别 | 判定 | 结果行 | 真值行 | 口径声明 | 归因 |",
-        "|---|---|---|---|---|---|---|",
+        "| 题号 | 类别 | 判定 | 结果行 | 真值行 | 口径合规 | 稳定 | 说明 | 归因 |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for x in items:
+        cal = {True: "是", False: "否", None: "-"}[x["caliber_compliant"]]
+        stab = f"{x['runs_ok']}/{x['runs']}"
         lines.append(
             f"| {x['id']} | {x['category']} | {'✅' if x['passed'] else '❌'} "
-            f"| {x['row_count']} | {x['truth_row_count']} "
-            f"| {'是' if x['declares_caliber'] else '否'} | {x['attribution'] or ''} |"
+            f"| {x['row_count']} | {x['truth_row_count'] if x['truth_row_count'] is not None else '-'} "
+            f"| {cal} | {stab} | {x['note'] or ''} | {x['attribution'] or ''} |"
         )
     (ROOT / "results" / f"report_{args.system}.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8")

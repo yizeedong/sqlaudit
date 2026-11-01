@@ -37,6 +37,8 @@ def main():
     ap.add_argument("--system", default="reviewmind-v1", help="被测系统名字，用作结果文件名")
     ap.add_argument("--sleep", type=float, default=1.0, help="每题之间暂停秒数")
     ap.add_argument("--only", default="", help="只跑指定题号，逗号分隔，如 A1,C3")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="同一题重复跑几次，用来测稳定性（结论会不会漂移）")
     args = ap.parse_args()
 
     import agent_core  # noqa: E402  延迟导入，避免没有依赖时直接崩
@@ -52,42 +54,52 @@ def main():
 
     traces = []
     started = datetime.now()
-    print(f"[start] system={args.system} n={len(questions)} at {started:%Y-%m-%d %H:%M:%S}", flush=True)
+    total = len(questions) * max(1, args.repeat)
+    print(
+        f"[start] system={args.system} n={len(questions)} repeat={args.repeat} "
+        f"calls={total} at {started:%Y-%m-%d %H:%M:%S}",
+        flush=True,
+    )
 
-    for i, q in enumerate(questions, 1):
-        t0 = time.time()
-        try:
-            trace = agent_core.ask_agent(q["question"])
-        except Exception:
-            trace = {
-                "question": q["question"],
-                "error": "harness_exception",
-                "stack": traceback.format_exc(),
-                "sql": None,
-                "tool_calls": [],
-                "result_columns": [],
-                "result_rows": [],
-                "conclusion": "",
-                "latency_ms": int((time.time() - t0) * 1000),
-                "usage": {},
-            }
-        trace.pop("df", None)
-        trace["id"] = q["id"]
-        trace["category"] = q["category"]
-        trace["judge"] = q["judge"]
-        traces.append(trace)
-        print(
-            f"[{i:02d}/{len(questions)}] {q['id']:<3} "
-            f"err={trace.get('error')} rows={len(trace.get('result_rows') or [])} "
-            f"{trace.get('latency_ms')}ms",
-            flush=True,
-        )
-        time.sleep(args.sleep)
+    done = 0
+    for rnd in range(1, max(1, args.repeat) + 1):
+        for q in questions:
+            done += 1
+            t0 = time.time()
+            try:
+                trace = agent_core.ask_agent(q["question"])
+            except Exception:
+                trace = {
+                    "question": q["question"],
+                    "error": "harness_exception",
+                    "stack": traceback.format_exc(),
+                    "sql": None,
+                    "tool_calls": [],
+                    "result_columns": [],
+                    "result_rows": [],
+                    "conclusion": "",
+                    "latency_ms": int((time.time() - t0) * 1000),
+                    "usage": {},
+                }
+            trace.pop("df", None)
+            trace["id"] = q["id"]
+            trace["category"] = q["category"]
+            trace["judge"] = q["judge"]
+            trace["run"] = rnd
+            traces.append(trace)
+            print(
+                f"[{done:03d}/{total}] run{rnd} {q['id']:<3} "
+                f"err={trace.get('error')} rows={len(trace.get('result_rows') or [])} "
+                f"{trace.get('latency_ms')}ms",
+                flush=True,
+            )
+            time.sleep(args.sleep)
 
     payload = {
         "system": args.system,
         "started_at": started.isoformat(timespec="seconds"),
         "finished_at": datetime.now().isoformat(timespec="seconds"),
+        "repeat": max(1, args.repeat),
         "eval_meta": meta,
         "traces": traces,
     }

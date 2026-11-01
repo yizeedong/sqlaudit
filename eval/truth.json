@@ -832,5 +832,63 @@
     "canonical": [
       "4124"
     ]
+  },
+  "G1": {
+    "judge": "clarify",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "G2": {
+    "judge": "clarify",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "G3": {
+    "judge": "clarify",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "G4": {
+    "judge": "clarify",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "H1": {
+    "judge": "absent",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "H2": {
+    "judge": "absent",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "H3": {
+    "judge": "absent",
+    "note": "该题无标准 SQL，由人工按 judge_note 判定"
+  },
+  "I1": {
+    "judge": "auto",
+    "columns": [
+      "pct"
+    ],
+    "row_count": 1,
+    "rows": [
+      [
+        9.33
+      ]
+    ],
+    "canonical": [
+      "9.330000"
+    ]
+  },
+  "I2": {
+    "judge": "auto",
+    "columns": [
+      "items_per_order"
+    ],
+    "row_count": 1,
+    "rows": [
+      [
+        1.1422
+      ]
+    ],
+    "canonical": [
+      "1.142200"
+    ]
   }
 }
