@@ -1,0 +1,506 @@
+{
+ "system": "v2-recheck",
+ "started_at": "2026-11-01T21:05:29",
+ "finished_at": "2026-11-01T21:06:42",
+ "repeat": 1,
+ "eval_meta": {
+  "name": "SQLAudit 评测集 v0.2",
+  "dataset": "Olist Brazilian E-Commerce (public)",
+  "db": "reviewmind/olist.db",
+  "views": [
+   "order_metrics",
+   "order_item_metrics"
+  ],
+  "note": "reference_sql 是人工写的标准答案查询；真值由 scripts/freeze_truth.py 实际执行后冻结，不允许手填。alt_reference_sql 表示存在另一种同样合理的口径，两个都算对。caliber 是口径合规检查用的关键词组：结论里每组至少命中一个说法才算声明了口径。judge=clarify 指题目本身有歧义，正确反应是澄清或明确声明假设；judge=absent 指问的维度数据里没有，正确反应是说明缺字段。"
+ },
+ "traces": [
+  {
+   "question": "各种支付方式分别有多少订单？按订单数从多到少排。",
+   "model": "deepseek-chat",
+   "agent": "v2",
+   "tools_offered": [
+    "list_tables",
+    "metric_glossary",
+    "run_sql",
+    "ask_clarification"
+   ],
+   "sql": "SELECT payment_type, COUNT(DISTINCT order_id) AS order_cnt FROM order_metrics WHERE payment_type IS NOT NULL GROUP BY payment_type ORDER BY order_cnt DESC",
+   "tool_calls": [
+    {
+     "name": "list_tables",
+     "arguments": {},
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "metric_glossary",
+     "arguments": {
+      "metric": "订单数 支付方式"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "metric_glossary",
+     "arguments": {
+      "metric": "订单数"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT payment_type, COUNT(DISTINCT order_id) AS order_cnt FROM order_metrics WHERE payment_type IS NOT NULL GROUP BY payment_type ORDER BY order_cnt DESC"
+     },
+     "ok": true,
+     "error": null
+    }
+   ],
+   "result_columns": [
+    "payment_type",
+    "order_cnt"
+   ],
+   "result_rows": [
+    [
+     "credit_card",
+     74259
+    ],
+    [
+     "boleto",
+     19784
+    ],
+    [
+     "voucher",
+     3866
+    ],
+    [
+     "debit_card",
+     1528
+    ],
+    [
+     "not_defined",
+     3
+    ]
+   ],
+   "result_preview": "payment_type  order_cnt\n credit_card      74259\n      boleto      19784\n     voucher       3866\n  debit_card       1528\n not_defined          3",
+   "conclusion": "口径：按 order_metrics 订单粒度统计，统计全部订单状态，排除 payment_type 为 NULL 的记录，并按订单去重计数。\n\n各支付方式的订单数从多到少如下：\n\n| 支付方式 | 订单数 |\n|---|---|\n| credit_card（信用卡） | 74,259 |\n| boleto（银行票据） | 19,784 |\n| voucher（代金券） | 3,866 |\n| debit_card（借记卡） | 1,528 |\n| not_defined（未定义） | 3 |\n\n信用卡是绝对主力，占比约 74%；boleto 次之，约 20%。需要注意，一个订单可能有多条支付记录，这里按订单去重计数，因此各支付方式的订单数相加会大于总订单数。",
+   "latency_ms": 15357,
+   "usage": {
+    "call1": {
+     "prompt_tokens": 848,
+     "completion_tokens": 28,
+     "total_tokens": 876
+    },
+    "call2": {
+     "prompt_tokens": 1435,
+     "completion_tokens": 43,
+     "total_tokens": 1478
+    },
+    "call3": {
+     "prompt_tokens": 1521,
+     "completion_tokens": 40,
+     "total_tokens": 1561
+    },
+    "call4": {
+     "prompt_tokens": 1625,
+     "completion_tokens": 70,
+     "total_tokens": 1695
+    },
+    "call5": {
+     "prompt_tokens": 1745,
+     "completion_tokens": 167,
+     "total_tokens": 1912
+    }
+   },
+   "error": null,
+   "rounds": 5,
+   "id": "A3",
+   "category": "A 单表聚合",
+   "judge": "auto",
+   "run": 1
+  },
+  {
+   "question": "平均客单价最高的 10 个州是哪些？",
+   "model": "deepseek-chat",
+   "agent": "v2",
+   "tools_offered": [
+    "list_tables",
+    "metric_glossary",
+    "run_sql",
+    "ask_clarification"
+   ],
+   "sql": "SELECT customer_state, COUNT(DISTINCT order_id) AS orders, SUM(payment_value) AS gmv, SUM(payment_value)/COUNT(DISTINCT order_id) AS aov FROM order_metrics WHERE order_status NOT IN ('canceled','unavailable') GROUP BY customer_state ORDER BY aov DESC LIMIT 15",
+   "tool_calls": [
+    {
+     "name": "metric_glossary",
+     "arguments": {
+      "metric": "客单价"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "list_tables",
+     "arguments": {},
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT customer_state, COUNT(DISTINCT order_id) AS orders, SUM(payment_value) AS gmv, SUM(payment_value)/COUNT(DISTINCT order_id) AS aov FROM order_metrics WHERE order_status NOT IN ('canceled','unavailable') GROUP BY customer_state ORDER BY aov DESC LIMIT 15"
+     },
+     "ok": true,
+     "error": null
+    }
+   ],
+   "result_columns": [
+    "customer_state",
+    "orders",
+    "gmv",
+    "aov"
+   ],
+   "result_rows": [
+    [
+     "PB",
+     531,
+     140519.57,
+     264.63195856873824
+    ],
+    [
+     "AC",
+     81,
+     19680.62,
+     242.97061728395062
+    ],
+    [
+     "AP",
+     68,
+     16262.8,
+     239.15882352941176
+    ],
+    [
+     "AL",
+     411,
+     96252.7,
+     234.19148418491483
+    ],
+    [
+     "RO",
+     246,
+     57433.47,
+     233.46939024390244
+    ],
+    [
+     "PA",
+     969,
+     217484.52,
+     224.44222910216718
+    ],
+    [
+     "RR",
+     45,
+     9948.97,
+     221.0882222222222
+    ],
+    [
+     "PI",
+     490,
+     107859.45,
+     220.12132653061224
+    ],
+    [
+     "TO",
+     278,
+     61103.85,
+     219.7980215827338
+    ],
+    [
+     "SE",
+     345,
+     73032.32,
+     211.68788405797105
+    ],
+    [
+     "RN",
+     482,
+     101908.6,
+     211.4286307053942
+    ],
+    [
+     "CE",
+     1323,
+     274549.81,
+     207.5206424792139
+    ],
+    [
+     "MT",
+     902,
+     186222.41,
+     206.455
+    ],
+    [
+     "MA",
+     736,
+     150691.7,
+     204.74415760869567
+    ],
+    [
+     "PE",
+     1643,
+     321120.88,
+     195.44788800973828
+    ]
+   ],
+   "result_preview": "customer_state  orders       gmv        aov\n            PB     531 140519.57 264.631959\n            AC      81  19680.62 242.970617\n            AP      68  16262.80 239.158824\n            AL     411  96252.70 234.191484\n            RO     246  57433.47 233.469390\n            PA     969 217484.52 224.442229\n            RR      45   9948.97 221.088222\n            PI     490 107859.45 220.121327\n            TO     278  61103.85 219.798022\n            SE     345  73032.32 211.687884\n            RN     482 101908.60 211.428631\n            CE    1323 274549.81 207.520642\n            MT     902 186222.41 206.455000\n            MA     736 150691.70 204.744158\n            PE    1643 321120.88 195.447888",
+   "conclusion": "口径：客单价 AOV = 该州 GMV（payment_value 求和）/ 该州订单数（order_id 去重），剔除 canceled、unavailable 状态订单，全时间范围。\n\n客单价最高的 10 个州（BRL）：\n\n| 排名 | 州 | 客单价 | 订单数 | GMV |\n|---|---|---|---|---|\n| 1 | PB | 264.63 | 531 | 140,519.57 |\n| 2 | AC | 242.97 | 81 | 19,680.62 |\n| 3 | AP | 239.16 | 68 | 16,262.80 |\n| 4 | AL | 234.19 | 411 | 96,252.70 |\n| 5 | RO | 233.47 | 246 | 57,433.47 |\n| 6 | PA | 224.44 | 969 | 217,484.52 |\n| 7 | RR | 221.09 | 45 | 9,948.97 |\n| 8 | PI | 220.12 | 490 | 107,859.45 |\n| 9 | TO | 219.80 | 278 | 61,103.85 |\n| 10 | SE | 211.69 | 345 | 73,032.32 |\n\n需要注意：榜单前列多为北部/东北部小州，AC、AP、RR 订单量仅 45–81 单，客单价波动大，参考意义有限；若只看订单量较大的州，PA（969 单）、PB（531 单）相对更稳健。",
+   "latency_ms": 16467,
+   "usage": {
+    "call1": {
+     "prompt_tokens": 844,
+     "completion_tokens": 53,
+     "total_tokens": 897
+    },
+    "call2": {
+     "prompt_tokens": 1512,
+     "completion_tokens": 104,
+     "total_tokens": 1616
+    },
+    "call3": {
+     "prompt_tokens": 1865,
+     "completion_tokens": 347,
+     "total_tokens": 2212
+    }
+   },
+   "error": null,
+   "rounds": 3,
+   "id": "B4",
+   "category": "B 多表与粒度",
+   "judge": "auto",
+   "run": 1
+  },
+  {
+   "question": "配送延迟最严重的 10 个州是哪些？",
+   "model": "deepseek-chat",
+   "agent": "v2",
+   "tools_offered": [
+    "list_tables",
+    "metric_glossary",
+    "run_sql",
+    "ask_clarification"
+   ],
+   "sql": "SELECT customer_state AS state, COUNT(*) AS n_orders, ROUND(100.0*SUM(CASE WHEN delivery_delay_days>0 THEN 1 ELSE 0 END)/COUNT(*),2) AS late_rate_pct, ROUND(AVG(delivery_delay_days),2) AS avg_delay_days FROM order_metrics WHERE delivery_delay_days IS NOT NULL GROUP BY customer_state ORDER BY late_rate_pct DESC LIMIT 10",
+   "tool_calls": [
+    {
+     "name": "metric_glossary",
+     "arguments": {
+      "metric": "配送延迟"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "list_tables",
+     "arguments": {},
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT customer_state AS state, COUNT(*) AS n_orders, ROUND(AVG(delivery_delay_days),2) AS avg_delay_days, ROUND(100.0*SUM(CASE WHEN delivery_delay_days>0 THEN 1 ELSE 0 END)/COUNT(*),2) AS late_rate_pct FROM order_metrics WHERE delivery_delay_days IS NOT NULL GROUP BY customer_state ORDER BY avg_delay_days DESC LIMIT 10"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT customer_state AS state, COUNT(*) AS n_orders, ROUND(100.0*SUM(CASE WHEN delivery_delay_days>0 THEN 1 ELSE 0 END)/COUNT(*),2) AS late_rate_pct, ROUND(AVG(delivery_delay_days),2) AS avg_delay_days FROM order_metrics WHERE delivery_delay_days IS NOT NULL GROUP BY customer_state ORDER BY late_rate_pct DESC LIMIT 10"
+     },
+     "ok": true,
+     "error": null
+    }
+   ],
+   "result_columns": [
+    "state",
+    "n_orders",
+    "late_rate_pct",
+    "avg_delay_days"
+   ],
+   "result_rows": [
+    [
+     "AL",
+     397,
+     23.93,
+     -8.04
+    ],
+    [
+     "MA",
+     717,
+     19.53,
+     -8.89
+    ],
+    [
+     "PI",
+     476,
+     15.97,
+     -10.63
+    ],
+    [
+     "CE",
+     1279,
+     15.25,
+     -10.11
+    ],
+    [
+     "SE",
+     335,
+     15.22,
+     -9.33
+    ],
+    [
+     "BA",
+     3256,
+     13.94,
+     -10.1
+    ],
+    [
+     "RJ",
+     12353,
+     13.42,
+     -11.06
+    ],
+    [
+     "TO",
+     274,
+     12.41,
+     -11.44
+    ],
+    [
+     "PA",
+     946,
+     12.37,
+     -13.39
+    ],
+    [
+     "ES",
+     1995,
+     12.23,
+     -9.8
+    ]
+   ],
+   "result_preview": "state  n_orders  late_rate_pct  avg_delay_days\n   AL       397          23.93           -8.04\n   MA       717          19.53           -8.89\n   PI       476          15.97          -10.63\n   CE      1279          15.25          -10.11\n   SE       335          15.22           -9.33\n   BA      3256          13.94          -10.10\n   RJ     12353          13.42          -11.06\n   TO       274          12.41          -11.44\n   PA       946          12.37          -13.39\n   ES      1995          12.23           -9.80",
+   "conclusion": "口径：配送延迟 = 实际送达日期 − 预计送达日期（正数为迟到），仅统计已送达且有延迟值的订单；「最严重」我同时给出两种排序，因为两者结论不同。\n\n**结论：无论按哪种口径，AL（阿拉戈斯）和 MA（马拉尼昂）都是延迟最严重的两个州；但第 3 名之后两种口径分歧明显。**\n\n**按平均延迟天数排序（越接近 0 越差，全部州平均仍为提前）**\n| 排名 | 州 | 订单数 | 平均延迟(天) | 迟到率 |\n|---|---|---|---|---|\n| 1 | AL | 397 | -8.04 | 23.93% |\n| 2 | MA | 717 | -8.89 | 19.53% |\n| 3 | SE | 335 | -9.33 | 15.22% |\n| 4 | ES | 1,995 | -9.80 | 12.23% |\n| 5 | BA | 3,256 | -10.10 | 13.94% |\n| 6 | CE | 1,279 | -10.11 | 15.25% |\n| 7 | MS | 701 | -10.36 | 11.41% |\n| 8 | SP | 40,495 | -10.38 | 5.83% |\n| 9 | PI | 476 | -10.63 | 15.97% |\n| 10 | SC | 3,547 | -10.81 | 9.70% |\n\n**按迟到订单占比排序**\n| 排名 | 州 | 订单数 | 迟到率 | 平均延迟(天) |\n|---|---|---|---|---|\n| 1 | AL | 397 | 23.93% | -8.04 |\n| 2 | MA | 717 | 19.53% | -8.89 |\n| 3 | PI | 476 | 15.97% | -10.63 |\n| 4 | CE | 1,279 | 15.25% | -10.11 |\n| 5 | SE | 335 | 15.22% | -9.33 |\n| 6 | BA | 3,256 | 13.94% | -10.10 |\n| 7 | RJ | 12,353 | 13.42% | -11.06 |\n| 8 | TO | 274 | 12.41% | -11.44 |\n| 9 | PA | 946 | 12.37% | -13.39 |\n| 10 | ES | 1,995 | 12.23% | -9.80 |\n\n几点提示：\n- 所有州的平均延迟都是负数，即整体都比承诺时间提前送达，所以「延迟严重」应理解为相对最差，而非绝对迟到。\n- 按平均天数排序时，SP 因体量大（4 万单）挤进前 10，但它的迟到率仅 5.83%，是全部州里最低之一，属于被平均天数口径「误伤」的典型；RJ、PA、TO 则相反，迟到率高但平均提前天数多。\n- 若你关注的是「有多少比例的订单没兑现承诺」，建议采用迟到率口径；若关注「迟到时迟到多久」，可再补充迟到订单的平均迟到天数。",
+   "latency_ms": 27362,
+   "usage": {
+    "call1": {
+     "prompt_tokens": 844,
+     "completion_tokens": 62,
+     "total_tokens": 906
+    },
+    "call2": {
+     "prompt_tokens": 1563,
+     "completion_tokens": 277,
+     "total_tokens": 1840
+    },
+    "call3": {
+     "prompt_tokens": 2181,
+     "completion_tokens": 726,
+     "total_tokens": 2907
+    }
+   },
+   "error": null,
+   "rounds": 3,
+   "id": "C1",
+   "category": "C 口径歧义",
+   "judge": "auto",
+   "run": 1
+  },
+  {
+   "question": "去年比前年增长了多少？",
+   "model": "deepseek-chat",
+   "agent": "v2",
+   "tools_offered": [
+    "list_tables",
+    "metric_glossary",
+    "run_sql",
+    "ask_clarification"
+   ],
+   "sql": "SELECT substr(order_purchase_timestamp,1,4) AS yr, COUNT(*) AS orders, ROUND(SUM(payment_value),2) AS gmv FROM order_metrics WHERE order_status='delivered' GROUP BY yr ORDER BY yr",
+   "tool_calls": [
+    {
+     "name": "metric_glossary",
+     "arguments": {
+      "metric": "GMV"
+     },
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "list_tables",
+     "arguments": {},
+     "ok": true,
+     "error": null
+    },
+    {
+     "name": "run_sql",
+     "arguments": {
+      "sql": "SELECT substr(order_purchase_timestamp,1,4) AS yr, COUNT(*) AS orders, ROUND(SUM(payment_value),2) AS gmv FROM order_metrics WHERE order_status='delivered' GROUP BY yr ORDER BY yr"
+     },
+     "ok": true,
+     "error": null
+    }
+   ],
+   "result_columns": [
+    "yr",
+    "orders",
+    "gmv"
+   ],
+   "result_rows": [
+    [
+     "2016",
+     267,
+     46586.33
+    ],
+    [
+     "2017",
+     43428,
+     6922900.24
+    ],
+    [
+     "2018",
+     52783,
+     8452975.2
+    ]
+   ],
+   "result_preview": "  yr  orders        gmv\n2016     267   46586.33\n2017   43428 6922900.24\n2018   52783 8452975.20",
+   "conclusion": "口径：已签收订单（order_status='delivered'）的支付总额（含运费），按购买时间年份归属。\n\n数据里只有 2016、2017、2018 三个完整度不同的年份，2016 年只有 267 单（数据从 2016 年 9 月才开始），所以「去年比前年」需要先确认指哪两年。按现有数据，最近两个可比年份是：\n\n- 2017 年：GMV 6,922,900.24 BRL，43,428 单\n- 2018 年：GMV 8,452,975.20 BRL，52,783 单\n- 2018 年比 2017 年增长 1,530,074.96 BRL，增幅约 22.1%；订单数增长 21.5%\n\n如果你说的「去年/前年」是 2017 对 2016，那 2016 年基数不完整（仅 46,586.33 BRL、267 单），同比增幅会严重失真，不建议直接比较。请确认你要对比的是哪两个年份，以及是否要按订单数、GMV 还是客单价来看增长。",
+   "latency_ms": 13701,
+   "usage": {
+    "call1": {
+     "prompt_tokens": 839,
+     "completion_tokens": 53,
+     "total_tokens": 892
+    },
+    "call2": {
+     "prompt_tokens": 1523,
+     "completion_tokens": 87,
+     "total_tokens": 1610
+    },
+    "call3": {
+     "prompt_tokens": 1663,
+     "completion_tokens": 257,
+     "total_tokens": 1920
+    }
+   },
+   "error": null,
+   "rounds": 3,
+   "id": "G3",
+   "category": "G 必须澄清",
+   "judge": "clarify",
+   "run": 1
+  }
+ ]
+}

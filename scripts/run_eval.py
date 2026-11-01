@@ -39,9 +39,12 @@ def main():
     ap.add_argument("--only", default="", help="只跑指定题号，逗号分隔，如 A1,C3")
     ap.add_argument("--repeat", type=int, default=1,
                     help="同一题重复跑几次，用来测稳定性（结论会不会漂移）")
+    ap.add_argument("--agent", default="agent_core",
+                    help="被测系统模块名：agent_core=ReviewMind v1，agent_v2=ReviewMind v2")
     args = ap.parse_args()
 
-    import agent_core  # noqa: E402  延迟导入，避免没有依赖时直接崩
+    import importlib
+    agent_mod = importlib.import_module(args.agent)  # noqa: E402  延迟导入，避免没有依赖时直接崩
 
     meta, questions = load_questions()
     if args.only:
@@ -67,7 +70,7 @@ def main():
             done += 1
             t0 = time.time()
             try:
-                trace = agent_core.ask_agent(q["question"])
+                trace = agent_mod.ask_agent(q["question"])
             except Exception:
                 trace = {
                     "question": q["question"],

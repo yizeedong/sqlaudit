@@ -841,7 +841,7 @@
    "judge": "clarify",
    "status": "pass_clarify",
    "passed": true,
-   "note": "已澄清/声明假设：我按、？",
+   "note": "已澄清/声明假设：我按、？、截至",
    "attribution": null,
    "sql": "SELECT MIN(order_purchase_timestamp) AS min_ts, MAX(order_purchase_timestamp) AS max_ts, COUNT(*) AS n FROM order_metrics",
    "row_count": 1,

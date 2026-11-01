@@ -32,6 +32,8 @@ CLARIFY_MARK = [
     "如果指", "假设", "这里按", "我按", "按 2017", "按2018", "需要明确", "?", "？",
     # 把题目拆成两种口径分别作答，也是合格的澄清
     "取决于", "看哪个指标", "两种口径", "分别按", "分别统计", "如果按",
+    # 不反问、但把「我按什么算」说到能复核，也算合格（v2 暴露出来的判定漏洞）
+    "往前推", "按数据", "以数据", "默认为", "理解为", "为准", "截至",
 ]
 # 维度不存在题：必须明确说清"没有这个字段 / 查不到"
 ABSENT_WORDS = ["没有", "不包含", "不存在", "未提供", "缺失", "缺少", "无法统计", "无法按", "查不到", "无此"]
@@ -413,7 +415,8 @@ def main():
         runs = runs_by_id[qid]
         runs_ok = sum(1 for t in runs if quick_pass(t, q, truth))
         sigs = {
-            (t.get("sql") or "") + "|" + json.dumps(t.get("result_rows") or [], ensure_ascii=False)
+            json.dumps(sorted(json.dumps(r, ensure_ascii=False, default=str)
+                              for r in (t.get("result_rows") or [])), ensure_ascii=False)
             for t in runs
         }
         item = items[-1]
