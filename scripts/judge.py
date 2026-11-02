@@ -17,9 +17,18 @@ r"""判分器：只看结果表，不看 SQL 写法。
 import argparse
 import json
 import itertools
+import os
 import re
+import sys
 from collections import Counter
 from pathlib import Path
+
+if os.name == "nt":
+    os.system("chcp 65001 > nul")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 ROOT = Path(__file__).resolve().parents[1]
 TOL = 1e-6
@@ -338,6 +347,16 @@ def main():
     questions = {q["id"]: q for q in json.loads(
         (ROOT / "eval" / "questions.json").read_text(encoding="utf-8"))["questions"]}
 
+    # 开发集 / 验收集隔离：对外只报 test
+    split_file = ROOT / "eval" / "split.json"
+    split_of = {}
+    if split_file.exists():
+        sp = json.loads(split_file.read_text(encoding="utf-8"))
+        for qid in sp.get("test", []):
+            split_of[qid] = "test"
+        for qid in sp.get("dev", []):
+            split_of[qid] = "dev"
+
     runs_by_id = {}
     for tr in payload["traces"]:
         runs_by_id.setdefault(tr["id"], []).append(tr)
@@ -392,6 +411,7 @@ def main():
 
         items.append({
             "id": qid,
+            "split": split_of.get(qid, "-"),
             "category": q["category"],
             "question": q["question"],
             "judge": kind,
@@ -455,6 +475,20 @@ def main():
         "stable_questions": sum(1 for x in items if x["runs_ok"] == x["runs"]),
         "drift_questions": sum(1 for x in items if x["drift"]),
     }
+    for grp in ("dev", "test"):
+        xs = [x for x in items if x["split"] == grp]
+        if not xs:
+            continue
+        stats.setdefault("by_split", {})[grp] = {
+            "n": len(xs),
+            "n_passed": sum(1 for x in xs if x["passed"]),
+            "pass_rate": round(sum(1 for x in xs if x["passed"]) / len(xs), 4),
+            "caliber_ok": sum(1 for x in xs if x["caliber_compliant"] is True),
+            "caliber_checked": sum(1 for x in xs if x["caliber_compliant"] is not None),
+            "drift_questions": sum(1 for x in xs if x["drift"]),
+            "avg_latency_ms": round(sum(x["latency_ms"] or 0 for x in xs) / len(xs)),
+            "avg_tokens": round(sum(x["tokens"] for x in xs) / len(xs)),
+        }
 
     out = {"stats": stats, "items": items}
     (ROOT / "results" / f"report_{args.system}.json").write_text(
@@ -471,14 +505,65 @@ def main():
         f"- 平均耗时：{stats['avg_latency_ms']} ms，平均 token：{stats['avg_tokens']}",
         f"- 失败分布：{stats['failure_breakdown']}",
         "",
-        "| 题号 | 类别 | 判定 | 结果行 | 真值行 | 口径合规 | 稳定 | 说明 | 归因 |",
-        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for grp, label in (("test", "验收集（对外报这个）"), ("dev", "开发集（调参用，不算成绩）")):
+        g = (stats.get("by_split") or {}).get(grp)
+        if not g:
+            continue
+        lines.append(
+            f"- {label}：{g['n_passed']}/{g['n']} = {g['pass_rate'] * 100:.1f}%"
+            f"；口径合规 {g['caliber_ok']}/{g['caliber_checked']}"
+            f"；漂移 {g['drift_questions']} 题"
+            f"；平均 {g['avg_latency_ms']} ms / {g['avg_tokens']} token"
+        )
+
+    # 验收门槛：只看验收集
+    gate_file = ROOT / "eval" / "gates.json"
+    if gate_file.exists():
+        gates = json.loads(gate_file.read_text(encoding="utf-8"))
+        xs = [x for x in items if x["split"] == "test"]
+        if xs:
+            n_t = len(xs)
+            checks = [
+                ("验收集通过率", sum(1 for x in xs if x["passed"]) / n_t,
+                 gates.get("pass_rate"), ">=", lambda v, t: v >= t),
+                ("危险指令拦截", sum(1 for x in xs if x["judge"] == "block" and x["passed"])
+                 / max(1, sum(1 for x in xs if x["judge"] == "block")),
+                 1.0 if gates.get("block_all") else 0.0, ">=", lambda v, t: v >= t),
+                ("口径合规率", sum(1 for x in xs if x["caliber_compliant"] is True)
+                 / max(1, sum(1 for x in xs if x["caliber_compliant"] is not None)),
+                 gates.get("caliber_rate"), ">=", lambda v, t: v >= t),
+                ("结果漂移率", sum(1 for x in xs if x["drift"]) / n_t,
+                 gates.get("drift_rate"), "<=", lambda v, t: v <= t),
+                ("平均 token", stats["avg_tokens"], gates.get("avg_tokens"), "<=", lambda v, t: v <= t),
+                ("平均耗时(ms)", stats["avg_latency_ms"], gates.get("avg_latency_ms"), "<=",
+                 lambda v, t: v <= t),
+            ]
+            passed_n = 0
+            lines.append("- 验收门槛（只看验收集）：")
+            for name, val, thr, op, fn in checks:
+                if thr is None:
+                    continue
+                good = fn(val, thr)
+                passed_n += 1 if good else 0
+                shown = f"{val * 100:.1f}%" if isinstance(thr, float) and thr <= 1 else f"{val}"
+                tshown = f"{thr * 100:.0f}%" if isinstance(thr, float) and thr <= 1 else f"{thr}"
+                lines.append(
+                    f"    - {'达标' if good else '未达标'} {name}：{shown}（门槛 {op} {tshown}）")
+            stats["gates"] = {"passed": passed_n, "total": len([c for c in checks if c[2] is not None])}
+            lines.append(f"    - 结果：{passed_n}/{stats['gates']['total']} 项达标"
+                         f"{'，验收通过' if passed_n == stats['gates']['total'] else '，未通过'}")
+
+    lines += [
+        "",
+        "| 题号 | 分组 | 类别 | 判定 | 结果行 | 真值行 | 口径合规 | 稳定 | 说明 | 归因 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for x in items:
         cal = {True: "是", False: "否", None: "-"}[x["caliber_compliant"]]
         stab = f"{x['runs_ok']}/{x['runs']}"
         lines.append(
-            f"| {x['id']} | {x['category']} | {'✅' if x['passed'] else '❌'} "
+            f"| {x['id']} | {x['split']} | {x['category']} | {'✅' if x['passed'] else '❌'} "
             f"| {x['row_count']} | {x['truth_row_count'] if x['truth_row_count'] is not None else '-'} "
             f"| {cal} | {stab} | {x['note'] or ''} | {x['attribution'] or ''} |"
         )

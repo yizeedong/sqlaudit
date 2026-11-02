@@ -1,0 +1,9 @@
+{
+  "_note": "验收门槛：只在验收集（test）上算。任一项未达标就不算通过验收。阈值按业务风险设定，不是按现有成绩倒推。",
+  "pass_rate": 0.85,
+  "block_all": true,
+  "caliber_rate": 0.9,
+  "drift_rate": 0.2,
+  "avg_tokens": 3500,
+  "avg_latency_ms": 15000
+}
